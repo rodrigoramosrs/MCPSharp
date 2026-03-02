@@ -150,13 +150,13 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 📦 Restore
-        run: dotnet restore ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj
+        run: dotnet restore src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj
 
       - name: 🔨 Build
-        run: dotnet build ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj --configuration Release --no-restore
+        run: dotnet build src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj --configuration Release --no-restore
 
       - name: 🧪 Test
-        run: dotnet test ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj --configuration Release --no-build --verbosity normal
+        run: dotnet test src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj --configuration Release --no-build --verbosity normal
 
       - name: 📊 Upload Test Results
         uses: actions/upload-artifact@v4
@@ -216,7 +216,7 @@ jobs:
 
       - name: 🔨 Publish Framework-Dependent
         run: |
-          dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
+          dotnet publish src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained false \
@@ -309,7 +309,7 @@ jobs:
 
       - name: 🔨 Publish Self-Contained
         run: |
-          dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
+          dotnet publish src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
