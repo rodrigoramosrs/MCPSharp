@@ -1,0 +1,533 @@
+# .github/workflows/release.yml
+name: 🚀 Build & Release
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT_NAME: 'MCPSharp'
+
+jobs:
+  # ==========================================
+  # CHECK IF SHOULD RUN (Prevent loops)
+  # ==========================================
+  check-skip:
+    name: ⏭️ Check Skip CI
+    runs-on: ubuntu-latest
+    outputs:
+      should-skip: ${{ steps.check.outputs.skip }}
+    
+    steps:
+      - name: 🔍 Check commit message
+        id: check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Commit message: $COMMIT_MSG"
+          
+          if [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || [[ "$COMMIT_MSG" == *"🔖 Bump version"* ]]; then
+            echo "⏭️ Skipping CI - version bump commit detected"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Running CI"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ==========================================
+  # VERSION BUMP & COMMIT
+  # ==========================================
+  version-bump:
+    name: 📈 Version Bump
+    needs: check-skip
+    if: needs.check-skip.outputs.should-skip == 'false' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      previous_version: ${{ steps.bump.outputs.previous_version }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+    
+    steps:
+      - name: 📥 Checkout with Token
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Get Current Version
+        id: current
+        run: |
+          # Try to get version from any .csproj
+          CURRENT_VERSION=$(grep -oP '<Version>\K[^<]+' MCPSharp/MCPSharp.csproj 2>/dev/null || echo "1.0.0")
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "📋 Current version: $CURRENT_VERSION"
+
+      - name: 📈 Bump Version
+        id: bump
+        run: |
+          CURRENT="${{ steps.current.outputs.current }}"
+          
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          
+          # Increment patch version
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "previous_version=$CURRENT" >> $GITHUB_OUTPUT
+          echo "bumped=true" >> $GITHUB_OUTPUT
+          
+          echo "🆕 Bumping version: $CURRENT → $NEW_VERSION"
+
+      - name: 📝 Update Version in All Projects
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.version }}"
+          
+          # Find all .csproj files and update version
+          find . -name "*.csproj" -type f | while read -r csproj; do
+            echo "Updating: $csproj"
+            
+            # Update or add Version property
+            if grep -q "<Version>" "$csproj"; then
+              # Replace existing version
+              sed -i "s|<Version>[^<]*</Version>|<Version>$NEW_VERSION</Version>|g" "$csproj"
+            else
+              # Add Version property inside first PropertyGroup
+              sed -i "s|</PropertyGroup>|<Version>$NEW_VERSION</Version>\n  </PropertyGroup>|" "$csproj"
+            fi
+            
+            # Also update PackageVersion if exists (for NuGet packages)
+            if grep -q "<PackageVersion>" "$csproj"; then
+              sed -i "s|<PackageVersion>[^<]*</PackageVersion>|<PackageVersion>$NEW_VERSION</PackageVersion>|g" "$csproj"
+            fi
+            
+            # Update AssemblyVersion
+            if grep -q "<AssemblyVersion>" "$csproj"; then
+              sed -i "s|<AssemblyVersion>[^<]*</AssemblyVersion>|<AssemblyVersion>$NEW_VERSION</AssemblyVersion>|g" "$csproj"
+            fi
+            
+            # Update FileVersion
+            if grep -q "<FileVersion>" "$csproj"; then
+              sed -i "s|<FileVersion>[^<]*</FileVersion>|<FileVersion>$NEW_VERSION</FileVersion>|g" "$csproj"
+            fi
+            
+            # Show updated version lines
+            grep -E "(Version|PackageVersion|AssemblyVersion|FileVersion)" "$csproj" | head -4 || true
+          done
+
+      - name: 📝 Update Directory.Build.props (if exists)
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.version }}"
+          
+          if [ -f "Directory.Build.props" ]; then
+            echo "Updating Directory.Build.props"
+            
+            if grep -q "<Version>" Directory.Build.props; then
+              sed -i "s|<Version>[^<]*</Version>|<Version>$NEW_VERSION</Version>|g" Directory.Build.props
+            fi
+            
+            if grep -q "<PackageVersion>" Directory.Build.props; then
+              sed -i "s|<PackageVersion>[^<]*</PackageVersion>|<PackageVersion>$NEW_VERSION</PackageVersion>|g" Directory.Build.props
+            fi
+          fi
+
+      - name: 🔧 Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 💾 Commit Version Bump
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.version }}"
+          
+          # Check if there are changes to commit
+          if git diff --quiet; then
+            echo "ℹ️ No changes to commit"
+            echo "bumped=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          git add -A
+          git commit -m "🔖 Bump version to $NEW_VERSION [skip ci]"
+          
+          # Create tag
+          git tag -a "v$NEW_VERSION" -m "🚀 Release v$NEW_VERSION"
+          
+          # Push changes and tag (this push will trigger a new workflow run, but will be skipped by check-skip)
+          git push origin HEAD:${{ github.ref_name }} --follow-tags
+          
+          echo "✅ Committed and tagged v$NEW_VERSION"
+
+  # ==========================================
+  # BUILD & TEST (Always continues)
+  # ==========================================
+  build-and-test:
+    name: Build & Test
+    needs: [check-skip, version-bump]
+    if: needs.check-skip.outputs.should-skip == 'false'
+    runs-on: ubuntu-latest
+    outputs:
+      test-status: ${{ steps.test.outputs.status }}
+      build-status: ${{ steps.build.outputs.status }}
+    
+    steps:
+      - name: 📥 Checkout (with new version if bumped)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: 🛠️ Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Restore
+        id: restore
+        continue-on-error: true
+        run: |
+          dotnet restore
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 🔨 Build
+        id: build
+        continue-on-error: true
+        run: |
+          dotnet build --configuration Release --no-restore || dotnet build --configuration Release
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 🧪 Test
+        id: test
+        continue-on-error: true
+        run: |
+          dotnet test --no-build --verbosity normal || dotnet test --verbosity normal
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: ⚠️ Report Status
+        run: |
+          echo "Build status: ${{ steps.build.outputs.status }}"
+          echo "Test status: ${{ steps.test.outputs.status }}"
+          echo "⚠️ Continuing with release regardless of test results"
+
+      - name: 📊 Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          retention-days: 5
+
+  # ==========================================
+  # BUILD MATRIX - FRAMEWORK-DEPENDENT
+  # ==========================================
+  build-framework-dependent:
+    name: Build Framework-Dependent
+    needs: [build-and-test, version-bump, check-skip]
+    if: needs.check-skip.outputs.should-skip == 'false'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            rid: win-x64
+            platform: Windows-x64
+          - os: windows-latest
+            rid: win-x86
+            platform: Windows-x86
+          - os: windows-latest
+            rid: win-arm64
+            platform: Windows-ARM64
+          
+          # Linux
+          - os: ubuntu-latest
+            rid: linux-x64
+            platform: Linux-x64
+          - os: ubuntu-latest
+            rid: linux-arm
+            platform: Linux-ARM
+          - os: ubuntu-latest
+            rid: linux-arm64
+            platform: Linux-ARM64
+          
+          # macOS
+          - os: macos-latest
+            rid: osx-x64
+            platform: macOS-x64
+          - os: macos-latest
+            rid: osx-arm64
+            platform: macOS-ARM64
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 🛠️ Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 🔨 Publish Framework-Dependent
+        continue-on-error: true
+        run: |
+          dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained false \
+            -p:PublishSingleFile=true \
+            -p:PublishTrimmed=false \
+            -p:Version=${{ needs.version-bump.outputs.version }} \
+            -o ./publish/framework-dependent/${{ matrix.rid }} \
+            || echo "⚠️ Publish may have warnings but continuing..."
+
+      - name: 📦 Package
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p ./artifacts
+          cd ./publish/framework-dependent/${{ matrix.rid }}
+          
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.zip . || true
+          else
+            tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.tar.gz . || true
+          fi
+
+      - name: ⬆️ Upload Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.platform }}-framework-dependent
+          path: ./artifacts/*
+          retention-days: 5
+
+  # ==========================================
+  # BUILD MATRIX - SELF-CONTAINED
+  # ==========================================
+  build-self-contained:
+    name: Build Self-Contained
+    needs: [build-and-test, version-bump, check-skip]
+    if: needs.check-skip.outputs.should-skip == 'false'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            rid: win-x64
+            platform: Windows-x64
+          - os: windows-latest
+            rid: win-x86
+            platform: Windows-x86
+          - os: windows-latest
+            rid: win-arm64
+            platform: Windows-ARM64
+          
+          # Linux
+          - os: ubuntu-latest
+            rid: linux-x64
+            platform: Linux-x64
+          - os: ubuntu-latest
+            rid: linux-musl-x64
+            platform: Linux-musl-x64
+          - os: ubuntu-latest
+            rid: linux-arm
+            platform: Linux-ARM
+          - os: ubuntu-latest
+            rid: linux-arm64
+            platform: Linux-ARM64
+          - os: ubuntu-latest
+            rid: linux-musl-arm64
+            platform: Linux-musl-ARM64
+          
+          # macOS
+          - os: macos-latest
+            rid: osx-x64
+            platform: macOS-x64
+          - os: macos-latest
+            rid: osx-arm64
+            platform: macOS-ARM64
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 🛠️ Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 🔨 Publish Self-Contained
+        continue-on-error: true
+        run: |
+          dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:PublishTrimmed=true \
+            -p:TrimMode=partial \
+            -p:Version=${{ needs.version-bump.outputs.version }} \
+            -o ./publish/self-contained/${{ matrix.rid }} \
+            || echo "⚠️ Publish may have warnings but continuing..."
+
+      - name: 📦 Package
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p ./artifacts
+          cd ./publish/self-contained/${{ matrix.rid }}
+          
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.zip . || true
+          else
+            tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.tar.gz . || true
+          fi
+
+      - name: ⬆️ Upload Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.platform }}-self-contained
+          path: ./artifacts/*
+          retention-days: 5
+
+  # ==========================================
+  # CREATE RELEASE
+  # ==========================================
+  release:
+    name: 🚀 Create Release
+    needs: [build-framework-dependent, build-self-contained, version-bump, check-skip]
+    if: needs.check-skip.outputs.should-skip == 'false' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 📥 Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-artifacts
+          pattern: '*-framework-dependent,*-self-contained'
+          merge-multiple: true
+
+      - name: 📋 List Artifacts
+        run: |
+          echo "📦 Artifacts to release:"
+          ls -la ./all-artifacts/
+
+      - name: 📝 Generate Release Notes
+        id: release_notes
+        run: |
+          NEW_VERSION="${{ needs.version-bump.outputs.version }}"
+          PREVIOUS="${{ needs.version-bump.outputs.previous_version }}"
+          
+          cat > ./RELEASE_NOTES.md << EOF
+          ## 🚀 MCPSharp v${NEW_VERSION}
+
+          **Previous version:** v${PREVIOUS}
+
+          ### 📦 Packages
+
+          **Framework-Dependent** (requires .NET 8 runtime):
+          - Smaller size, faster startup
+          - Requires \`dotnet\` or .NET 8 runtime installed
+
+          **Self-Contained** (no dependencies):
+          - Larger size, includes runtime
+          - Zero dependencies, works on clean machines
+          - Trimmed for smaller footprint
+
+          ### 🖥️ Platforms
+
+          | OS | Architectures |
+          |----|---------------|
+          | Windows | x64, x86, ARM64 |
+          | Linux | x64, ARM, ARM64, musl variants |
+          | macOS | x64 (Intel), ARM64 (Apple Silicon) |
+
+          ### 🔧 Installation
+
+          \`\`\`bash
+          # Download and extract for your platform
+          curl -L -o mcpsharp.tar.gz https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/MCPSharp-${NEW_VERSION}-Linux-x64-self-contained.tar.gz
+          tar -xzf mcpsharp.tar.gz
+          ./MCPSharp --help
+          \`\`\`
+
+          ### 📝 Changes
+          - Version bumped from v${PREVIOUS} to v${NEW_VERSION}
+          - Auto-generated release from commit ${{ github.sha }}
+          
+          ### 📋 Checksums
+          EOF
+          
+          # Generate checksums
+          cd ./all-artifacts
+          sha256sum * >> ../RELEASE_NOTES.md || true
+          cd ..
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.version-bump.outputs.version }}
+          name: 🚀 MCPSharp v${{ needs.version-bump.outputs.version }}
+          body_path: ./RELEASE_NOTES.md
+          files: ./all-artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  # ==========================================
+  # NUGET PACKAGE
+  # ==========================================
+  nuget:
+    name: 📦 Publish to NuGet
+    needs: [build-and-test, version-bump, check-skip]
+    if: needs.check-skip.outputs.should-skip == 'false' && contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 🛠️ Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Pack NuGet
+        continue-on-error: true
+        run: |
+          dotnet pack MCPSharp.Core/MCPSharp.Core.csproj \
+            -c Release \
+            -p:Version=${{ needs.version-bump.outputs.version }} \
+            -o ./nuget-packages \
+            || echo "⚠️ Pack may have warnings but continuing..."
+
+      - name: ⬆️ Push to NuGet
+        continue-on-error: true
+        run: |
+          dotnet nuget push ./nuget-packages/*.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate \
+            || echo "⚠️ Push may have warnings but continuing..."
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

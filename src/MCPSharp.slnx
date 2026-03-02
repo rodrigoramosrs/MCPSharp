@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Examples/">
+    <Project Path="MCPSharp.Console/MCPSharp.Console.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="MCPSharp.Tests/MCPSharp.Tests.csproj" Id="17634d8f-fdb8-4523-8fd9-79b761195624" />
+  </Folder>
+  <Project Path="MCPSharp.Core/MCPSharp.Core.csproj" Id="edbc177a-58ca-4f49-b51d-6f25f178f942" />
+  <Project Path="MCPSharp/MCPSharp/MCPSharp.csproj" Id="07cf0e8d-1ef0-4d28-93d8-6f103eab74fa" />
+</Solution>
