@@ -467,7 +467,7 @@ jobs:
 
       - name: 📦 Pack NuGet
         run: |
-          dotnet pack MCPSharp.Core/MCPSharp.Core.csproj \
+          dotnet pack src/MCPSharp.Core/MCPSharp.Core.csproj \
             -c Release \
             -p:Version=${{ needs.version-bump.outputs.version }} \
             -o ./nuget-packages
