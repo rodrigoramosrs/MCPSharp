@@ -59,7 +59,7 @@ jobs:
       - name: 🔍 Get Current Version
         id: current
         run: |
-          CURRENT_VERSION=$(grep -oP '<Version>\K[^<]+' MCPSharp/MCPSharp.csproj 2>/dev/null || echo "1.0.0")
+          CURRENT_VERSION=$(grep -oP '<Version>\K[^<]+' src/MCPSharp/MCPSharp.csproj 2>/dev/null || echo "1.0.0")
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "📋 Current version: $CURRENT_VERSION"
 
