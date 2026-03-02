@@ -150,16 +150,13 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 📦 Restore
-        continue-on-error: true
         run: dotnet restore
 
       - name: 🔨 Build
-        continue-on-error: true
-        run: dotnet build --configuration Release --no-restore || dotnet build --configuration Release
+        run: dotnet build --configuration Release --no-restore
 
       - name: 🧪 Test
-        continue-on-error: true
-        run: dotnet test --no-build --verbosity normal || dotnet test --verbosity normal
+        run: dotnet test --no-build --verbosity normal
 
       - name: 📊 Upload Test Results
         uses: actions/upload-artifact@v4
@@ -218,7 +215,6 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 🔨 Publish Framework-Dependent
-        continue-on-error: true
         run: |
           dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
@@ -227,33 +223,35 @@ jobs:
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=false \
             -p:Version=${{ needs.version-bump.outputs.version }} \
-            -o ./publish/framework-dependent/${{ matrix.rid }} || true
+            -o ./publish/framework-dependent/${{ matrix.rid }}
 
       - name: 📦 Package
         shell: bash
-        continue-on-error: true
         run: |
           mkdir -p ./artifacts
           if [ -d "./publish/framework-dependent/${{ matrix.rid }}" ]; then
             cd ./publish/framework-dependent/${{ matrix.rid }}
             if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-              7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.zip . || true
+              7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.zip .
             else
-              tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.tar.gz . || true
+              tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-framework-dependent.tar.gz .
             fi
+            echo "✅ Pacote criado com sucesso"
           else
-            echo "⚠️ Publish directory not found, creating empty artifact"
-            touch ./artifacts/FAILED-${{ matrix.platform }}-framework-dependent.txt
+            echo "❌ Publish directory not found" > ./artifacts/FAILED-${{ matrix.platform }}-framework-dependent.txt
+            exit 1
           fi
+
+      - name: 📋 List artifacts
+        run: ls -la ./artifacts/
 
       - name: ⬆️ Upload Artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: ${{ matrix.platform }}-framework-dependent
           path: ./artifacts/*
           retention-days: 5
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # ==========================================
   # BUILD MATRIX - SELF-CONTAINED
@@ -310,7 +308,6 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 🔨 Publish Self-Contained
-        continue-on-error: true
         run: |
           dotnet publish ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
@@ -320,33 +317,35 @@ jobs:
             -p:PublishTrimmed=true \
             -p:TrimMode=partial \
             -p:Version=${{ needs.version-bump.outputs.version }} \
-            -o ./publish/self-contained/${{ matrix.rid }} || true
+            -o ./publish/self-contained/${{ matrix.rid }}
 
       - name: 📦 Package
         shell: bash
-        continue-on-error: true
         run: |
           mkdir -p ./artifacts
           if [ -d "./publish/self-contained/${{ matrix.rid }}" ]; then
             cd ./publish/self-contained/${{ matrix.rid }}
             if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-              7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.zip . || true
+              7z a ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.zip .
             else
-              tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.tar.gz . || true
+              tar -czf ../../../artifacts/${{ env.PROJECT_NAME }}-${{ needs.version-bump.outputs.version }}-${{ matrix.platform }}-self-contained.tar.gz .
             fi
+            echo "✅ Pacote criado com sucesso"
           else
-            echo "⚠️ Publish directory not found, creating empty artifact"
-            touch ./artifacts/FAILED-${{ matrix.platform }}-self-contained.txt
+            echo "❌ Publish directory not found" > ./artifacts/FAILED-${{ matrix.platform }}-self-contained.txt
+            exit 1
           fi
+
+      - name: 📋 List artifacts
+        run: ls -la ./artifacts/
 
       - name: ⬆️ Upload Artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: ${{ matrix.platform }}-self-contained
           path: ./artifacts/*
           retention-days: 5
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # ==========================================
   # CREATE RELEASE
@@ -366,36 +365,36 @@ jobs:
           path: ./all-artifacts
           merge-multiple: true
 
-      - name: 📋 List and Organize Artifacts
+      - name: 📋 List Downloaded Artifacts
         run: |
           echo "📦 Artifacts downloaded:"
-          find ./all-artifacts -type f -ls || true
+          find ./all-artifacts -type f -ls || echo "⚠️ Nenhum arquivo encontrado"
           
-          # Criar diretório de release
           mkdir -p ./release-artifacts
-          
-          # Mover todos os arquivos para o diretório de release
-          find ./all-artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} ./release-artifacts/ \; || true
+          # Copia todos os arquivos que são pacotes (zip/tar.gz) ou arquivos de falha (para debug)
+          find ./all-artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "FAILED-*.txt" \) -exec cp {} ./release-artifacts/ \; || true
           
           echo "📦 Artifacts para release:"
           ls -la ./release-artifacts/ || echo "⚠️ Nenhum artifact encontrado"
 
       - name: 📝 Generate Release Notes
         id: release_notes
+        env:
+          NEW_VERSION: ${{ needs.version-bump.outputs.version }}
+          PREVIOUS_VERSION: ${{ needs.version-bump.outputs.previous_version }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          NEW_VERSION="${{ needs.version-bump.outputs.version }}"
-          PREVIOUS="${{ needs.version-bump.outputs.previous_version }}"
-          
-          cat > ./RELEASE_NOTES.md << 'EOF'
+          cat > ./RELEASE_NOTES.md << EOF
           ## 🚀 MCPSharp v${NEW_VERSION}
 
-          **Previous version:** v${PREVIOUS}
+          **Previous version:** v${PREVIOUS_VERSION}
 
           ### 📦 Packages
 
           **Framework-Dependent** (requires .NET 8 runtime):
           - Smaller size, faster startup
-          - Requires `dotnet` or .NET 8 runtime installed
+          - Requires \`dotnet\` or .NET 8 runtime installed
 
           **Self-Contained** (no dependencies):
           - Larger size, includes runtime
@@ -412,21 +411,20 @@ jobs:
 
           ### 🔧 Installation
 
-          ```bash
+          \`\`\`bash
           # Download and extract for your platform
-          curl -L -o mcpsharp.tar.gz https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/MCPSharp-${NEW_VERSION}-Linux-x64-self-contained.tar.gz
+          curl -L -o mcpsharp.tar.gz https://github.com/${REPOSITORY}/releases/download/v${NEW_VERSION}/MCPSharp-${NEW_VERSION}-Linux-x64-self-contained.tar.gz
           tar -xzf mcpsharp.tar.gz
           ./MCPSharp --help
-          ```
+          \`\`\`
 
           ### 📝 Changes
-          - Version bumped from v${PREVIOUS} to v${NEW_VERSION}
-          - Auto-generated release from commit ${{ github.sha }}
+          - Version bumped from v${PREVIOUS_VERSION} to v${NEW_VERSION}
+          - Auto-generated release from commit ${SHA}
           
           ### 📋 Checksums
           EOF
           
-          # Generate checksums se houver artifacts
           if [ -d "./release-artifacts" ] && [ "$(ls -A ./release-artifacts)" ]; then
             cd ./release-artifacts
             sha256sum * >> ../RELEASE_NOTES.md || true
@@ -468,21 +466,19 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 📦 Pack NuGet
-        continue-on-error: true
         run: |
           dotnet pack MCPSharp.Core/MCPSharp.Core.csproj \
             -c Release \
             -p:Version=${{ needs.version-bump.outputs.version }} \
-            -o ./nuget-packages || true
+            -o ./nuget-packages
 
       - name: ⬆️ Push to NuGet
-        continue-on-error: true
         run: |
           if [ -f "./nuget-packages/*.nupkg" ]; then
             dotnet nuget push ./nuget-packages/*.nupkg \
               --api-key ${{ secrets.NUGET_API_KEY }} \
               --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate || true
+              --skip-duplicate
           else
             echo "⚠️ No NuGet packages found to push"
           fi
