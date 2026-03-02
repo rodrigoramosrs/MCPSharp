@@ -5,7 +5,8 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-	</PropertyGroup>
+	<Version>1.0.1</Version>
+  </PropertyGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\MCPSharp.Core\MCPSharp.Core.csproj" />
