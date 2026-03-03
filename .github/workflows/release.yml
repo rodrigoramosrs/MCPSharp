@@ -215,6 +215,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 🔨 Publish Framework-Dependent
+        shell: bash
         run: |
           dotnet publish src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
@@ -308,6 +309,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 🔨 Publish Self-Contained
+        shell: bash
         run: |
           dotnet publish src/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj \
             -c Release \
