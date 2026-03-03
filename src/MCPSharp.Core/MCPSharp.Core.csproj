@@ -4,12 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-  <Version>1.0.6</Version>
+  <Version>1.0.7</Version>
   </PropertyGroup>
   
   <PropertyGroup>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-  <Version>1.0.6</Version>
+  <Version>1.0.7</Version>
   </PropertyGroup>
   <ItemGroup>
 	<None Include="../../readme.md" Pack="true" PackagePath="README.md" />
@@ -22,7 +22,7 @@
 	<RepositoryType>git</RepositoryType>
 	<Copyright>Copyright © 2026 Rodrigo Ramos</Copyright>
 	<PackageTags>MCPSharp;MCP;dotnet;CSharp;Roslyn;Build;NuGet</PackageTags>
-  <Version>1.0.6</Version>
+  <Version>1.0.7</Version>
   </PropertyGroup>
 
   <ItemGroup>
