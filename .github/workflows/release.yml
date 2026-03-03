@@ -244,6 +244,7 @@ jobs:
           fi
 
       - name: 📋 List artifacts
+        shell: bash
         run: ls -la ./artifacts/
 
       - name: ⬆️ Upload Artifact
@@ -339,6 +340,7 @@ jobs:
           fi
 
       - name: 📋 List artifacts
+        shell: bash
         run: ls -la ./artifacts/
 
       - name: ⬆️ Upload Artifact
