@@ -396,9 +396,9 @@ jobs:
 
           ### 📦 Packages
 
-          **Framework-Dependent** (requires .NET 8 runtime):
+          **Framework-Dependent** (requires .NET 10 runtime):
           - Smaller size, faster startup
-          - Requires \`dotnet\` or .NET 8 runtime installed
+          - Requires \`dotnet\` or .NET 10 runtime installed
 
           **Self-Contained** (no dependencies):
           - Larger size, includes runtime
@@ -430,9 +430,12 @@ jobs:
           EOF
           
           if [ -d "./release-artifacts" ] && [ "$(ls -A ./release-artifacts)" ]; then
+            # Adiciona bloco de código para os checksums
+            echo -e "\n\`\`\`" >> ./RELEASE_NOTES.md
             cd ./release-artifacts
             sha256sum * >> ../RELEASE_NOTES.md || true
             cd ..
+            echo "\`\`\`" >> ./RELEASE_NOTES.md
           else
             echo -e "\n⚠️ No artifacts to checksum" >> ./RELEASE_NOTES.md
           fi
